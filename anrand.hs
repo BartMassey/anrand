@@ -7,7 +7,6 @@ import Graphics.Rendering.Chart.Backend.Cairo
 
 import Data.Bits
 import qualified Data.ByteString as B
-import qualified Data.ByteString.Char8 as BC
 import Data.List
 import System.Directory
 import System.FilePath
@@ -22,7 +21,7 @@ analysisFile what suff ext =
 
 pdfRender :: String -> Renderable a -> IO ()
 pdfRender name r = do
-    renderableToFile (fo_format .~ PDF $ def) name r
+    _ <- renderableToFile (fo_format .~ PDF $ def) name r
     return ()
 
 readSamples :: B.ByteString -> [Int]
@@ -77,12 +76,12 @@ plotTimeSeries samples = do
           def
   layoutToRenderable tsLayout
 
-plotSampleHist :: [Int] -> Renderable (LayoutPick Double Int Int)
-plotSampleHist samples = do
+plotSampleHist :: Int -> [Int] -> Renderable (LayoutPick Double Int Int)
+plotSampleHist nBins samples = do
   let histPlot =
           histToPlot $
           plot_hist_title .~ "Sample Histogram" $
-          plot_hist_bins .~ maximum samples - minimum samples + 1 $
+          plot_hist_bins .~ nBins $
           plot_hist_values .~  map fromIntegral samples $
           (defaultPlotHist :: PlotHist Double Int)
   let histLayout =
@@ -101,21 +100,27 @@ entropy samples =
           where
             p = fromIntegral count / fromIntegral nStates
 
-showStats :: Double -> [Int] -> String
-showStats entropyAdj samples =
-  let nSamples = length samples in
-  printf "min: %d  max: %d  mean: %0.3g  entropy: %0.3g\n"
+showStats :: Int -> [Int] -> String
+showStats nBits samples =
+  printf "min: %d  max: %d  mean: %0.3g  byte-entropy: %0.3g\n"
       (minimum samples)
       (maximum samples)
       (fromIntegral (sum samples) / fromIntegral nSamples :: Double)
       (entropyAdj * entropy (rawHist samples))
+  where
+    nSamples = length samples
+    entropyAdj = max 1.0 $ 8.0 / fromIntegral nBits
 
-analyze :: String -> Double -> [Int] -> IO ()
-analyze what entropyAdj samples = do
-  writeFile (analysisFile what "stats" "txt") $ showStats entropyAdj samples
-  pdfRender (analysisFile what "ts" "pdf") $ plotTimeSeries samples
-  pdfRender (analysisFile what "hist" "pdf") $ plotSampleHist samples
-  writeFile (analysisFile what "hist" "txt") $ showHist $ rawHist samples
+analyze :: String -> Int -> [Int] -> IO ()
+analyze what nBits samples = do
+  writeFile (analysisFile what "stats" "txt") $
+    showStats nBits samples
+  pdfRender (analysisFile what "ts" "pdf") $
+    plotTimeSeries samples
+  pdfRender (analysisFile what "hist" "pdf") $
+    plotSampleHist (2 ^ nBits) samples
+  writeFile (analysisFile what "hist" "txt") $
+    showHist $ rawHist samples
 
 main :: IO ()
 main = do
@@ -124,13 +129,13 @@ main = do
   rawSamples <- B.getContents
   let samples = readSamples rawSamples
 
-  analyze "raw" 1.0 samples
+  analyze "raw" 12 samples
 
   let lowSamples = map (.&. 0xff) samples
-  analyze "low" 1.0 lowSamples
+  analyze "low" 8 lowSamples
 
   let midSamples = map ((.&. 0xff) . (`shiftR` 1)) samples
-  analyze "mid" 1.0 midSamples
+  analyze "mid" 8 midSamples
 
   let twoBitSamples = map (.&. 0x03) samples
-  analyze "twobit" 4.0 twoBitSamples
+  analyze "twobit" 2 twoBitSamples
