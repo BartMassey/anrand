@@ -9,10 +9,16 @@ import Data.Bits
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BC
 import Data.List
+import System.Directory
+import System.FilePath
 import Text.Printf
 
-analysis :: String -> String -> String
-analysis what suff = "analysis/" ++ what ++ suff
+analysisDir :: FilePath
+analysisDir = "analysis"
+
+analysisFile :: FilePath -> String -> String-> FilePath
+analysisFile what suff ext =
+    joinPath [analysisDir, addExtension (what ++ "-" ++ suff) ext]
 
 pdfRender :: String -> Renderable a -> IO ()
 pdfRender name r = do
@@ -106,13 +112,15 @@ showStats entropyAdj samples =
 
 analyze :: String -> Double -> [Int] -> IO ()
 analyze what entropyAdj samples = do
-  writeFile (analysis what "-stats.txt") $ showStats entropyAdj samples
-  pdfRender (analysis what "-ts.pdf") $ plotTimeSeries samples
-  pdfRender (analysis what "-hist.pdf") $ plotSampleHist samples
-  writeFile (analysis what "-hist.txt") $ showHist $ rawHist samples
+  writeFile (analysisFile what "stats" "txt") $ showStats entropyAdj samples
+  pdfRender (analysisFile what "ts" "pdf") $ plotTimeSeries samples
+  pdfRender (analysisFile what "hist" "pdf") $ plotSampleHist samples
+  writeFile (analysisFile what "hist" "txt") $ showHist $ rawHist samples
 
 main :: IO ()
 main = do
+  createDirectoryIfMissing True analysisDir
+
   rawSamples <- B.getContents
   let samples = readSamples rawSamples
 
