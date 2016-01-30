@@ -95,36 +95,18 @@ entropy samples =
           where
             p = fromIntegral count / fromIntegral nStates
 
--- The specific data we're looking at has a mod 4 entropy problem.
--- We'll deal with it because we need to.
-mod4entropy :: [Int] -> Double
-mod4entropy samples =
-    entropy mod4sums
-    where
-      mod4sums = sumMod 4 $ rawHist samples
-      sumMod :: Int -> [(Int, Int)] -> [(Int, Int)]
-      sumMod m [] = zip [0..m - 1] $ replicate m 0
-      sumMod m ((x, y) : xs) =
-          map (addBin (x `mod` m, y)) $ sumMod m xs
-          where
-            addBin :: (Int, Int) -> (Int, Int) -> (Int, Int)
-            addBin (i, j) (i', j') | i == i' = (i, j + j')
-            addBin (_, _) (i', j') = (i', j')
-                
-
-showStats :: [Int] -> String
-showStats samples =
+showStats :: Double -> [Int] -> String
+showStats entropyAdj samples =
   let nSamples = length samples in
-  printf "min: %d  max: %d  mean: %0.3g\nentropy: %0.3g  mod4entropy: %0.3g\n"
+  printf "min: %d  max: %d  mean: %0.3g  entropy: %0.3g\n"
       (minimum samples)
       (maximum samples)
       (fromIntegral (sum samples) / fromIntegral nSamples :: Double)
-      (entropy $ rawHist samples)
-      (mod4entropy samples)
+      (entropyAdj * entropy (rawHist samples))
 
-analyze :: String -> [Int] -> IO ()
-analyze what samples = do
-  writeFile (analysis what "-stats.txt") $ showStats samples
+analyze :: String -> Double -> [Int] -> IO ()
+analyze what entropyAdj samples = do
+  writeFile (analysis what "-stats.txt") $ showStats entropyAdj samples
   pdfRender (analysis what "-ts.pdf") $ plotTimeSeries samples
   pdfRender (analysis what "-hist.pdf") $ plotSampleHist samples
   writeFile (analysis what "-hist.txt") $ showHist $ rawHist samples
@@ -134,10 +116,13 @@ main = do
   rawSamples <- B.getContents
   let samples = readSamples rawSamples
 
-  analyze "raw" samples
+  analyze "raw" 1.0 samples
 
   let lowSamples = map (.&. 0xff) samples
-  analyze "low" lowSamples
+  analyze "low" 1.0 lowSamples
 
   let midSamples = map ((.&. 0xff) . (`shiftR` 1)) samples
-  analyze "mid" midSamples
+  analyze "mid" 1.0 midSamples
+
+  let twoBitSamples = map (.&. 0x03) samples
+  analyze "twobit" 4.0 twoBitSamples
