@@ -77,18 +77,19 @@ plotTimeSeries samples = do
               takeSpan (nSamples `div` 3) 100 samples
   let allPlot =
           toPlot $
-          plot_points_style .~ filledCircles 0.5 (opaque green) $
+          plot_points_style .~ filledCircles 0.5 (opaque gray) $
           plot_points_values .~ samplePoints $
           plot_points_title .~ "all" $
           def
   let zoomedPlot =
           toPlot $
-          plot_lines_style . line_color .~ opaque red $
+          plot_lines_style . line_color .~ opaque black $
           plot_lines_values .~ [zoomedPoints] $
           plot_lines_title .~ "zoomed" $
           def
   let tsLayout =
-          layout_title .~ "Time Series" $
+          layout_x_axis .~ (laxis_title .~ "sample" $ def) $
+          layout_y_axis .~ (laxis_title .~ "value" $ def) $
           layout_plots .~ [allPlot, zoomedPlot] $
           def
   layoutToRenderable tsLayout
@@ -97,13 +98,14 @@ plotSampleHist :: Int -> [Int] -> Renderable (LayoutPick Int Int Int)
 plotSampleHist nBins samples = do
   let histPlot =
           plotBars $
-          plot_bars_titles .~ ["Sample Histogram"] $
           plot_bars_values .~  sampleBars ++ [(nBins, [0])] $
           plot_bars_item_styles .~ [(FillStyleSolid (opaque red), Nothing)] $
           plot_bars_spacing .~ BarsFixGap 0 0 $
           plot_bars_alignment .~ BarsLeft $
           def
   let histLayout =
+          layout_x_axis .~ (laxis_title .~ "value" $ def) $
+          layout_y_axis .~ (laxis_title .~ "frequency" $ def) $
           layout_plots .~ [histPlot] $
           def
   layoutToRenderable histLayout
@@ -111,17 +113,19 @@ plotSampleHist nBins samples = do
     sampleBars =
         map (\(x, y) -> (x, [y])) $ rawHist samples
 
-plotSampleDFT :: [Int] -> Renderable (LayoutPick Double Double Double)
-plotSampleDFT samples = do
+data Bias = BiasNominal Int | BiasDebiased
+
+plotSampleDFT :: Bias -> [Int] -> Renderable (LayoutPick Double Double Double)
+plotSampleDFT bias samples = do
   let dftPlot =
           plotBars $
           plot_bars_spacing .~ BarsFixWidth 0.1 $
-          plot_bars_values .~ sampleBars $
-          plot_bars_titles .~ ["Relative Frequencies"] $
+          plot_bars_values .~ dftBars $
           plot_bars_item_styles .~ [(FillStyleSolid (opaque red), Nothing)] $
           def
   let dftLayout =
-          layout_title .~ "DFT (magnitude)" $
+          layout_x_axis .~ (laxis_title .~ "frequency" $ def) $
+          layout_y_axis .~ (laxis_title .~ "amplitude" $ def) $
           layout_plots .~ [dftPlot] $
           def
   layoutToRenderable dftLayout
@@ -130,13 +134,17 @@ plotSampleDFT samples = do
     dftLength = min 10000 nSamples
     dftStart = (nSamples - dftLength) `div` 3
     dftSamples = takeSpan dftStart dftLength samples
-    normalizedSamples =
-        map norm dftSamples
+    targetDFT =
+        sampleDFT $ map norm dftSamples
         where
-          dftDC = average dftSamples
-          norm sample = fromIntegral sample - dftDC
-    sampleBars =
-        map (\(x, y) -> (x, [y])) $ zip [0..] $ sampleDFT normalizedSamples
+          norm sample =
+              (fromIntegral sample - dftDC) / fromIntegral nSamples
+              where
+                dftDC = 
+                    case bias of
+                      BiasNominal nBits -> fromIntegral (2 ^ (nBits - 1) - 1)
+                      BiasDebiased -> average dftSamples
+    dftBars = map (\(x, y) -> (x, [y])) $ zip [0..] targetDFT
 
 entropy :: [(Int, Int)] -> Double
 entropy samples =
@@ -178,8 +186,10 @@ analyze what nBits samples = do
     plotTimeSeries samples
   pdfRender (analysisFile what "hist" "pdf") $
     plotSampleHist (2 ^ nBits) samples
+  pdfRender (analysisFile what "rdft" "pdf") $
+    plotSampleDFT (BiasNominal nBits) samples
   pdfRender (analysisFile what "dft" "pdf") $
-    plotSampleDFT samples
+    plotSampleDFT BiasDebiased samples
 
 main :: IO ()
 main = do
@@ -199,5 +209,5 @@ main = do
   let twoBitSamples = map (.&. 0x03) samples
   analyze "twobit" 2 twoBitSamples
 
-  prngSamples <- replicateM (length samples) (randomRIO (0, 2047) :: IO Int)
+  prngSamples <- replicateM (length samples) (randomRIO (0, 4095) :: IO Int)
   analyze "prng" 12 prngSamples
