@@ -5,6 +5,10 @@ import Data.Default.Class
 import Graphics.Rendering.Chart
 import Graphics.Rendering.Chart.Backend.Cairo
 
+import Data.Complex
+import qualified Data.Vector.Unboxed as V
+import Numeric.FFT.Vector.Unnormalized
+
 import Data.Bits
 import qualified Data.ByteString as B
 import Data.List
@@ -36,6 +40,10 @@ readSamples stuff =
           in
           ((i1 `shiftL` 8) .|. i2) : makeInts bs
             
+takeSpan :: Int -> Int -> [a] -> [a]
+takeSpan start len xs =
+    take len $ drop start xs
+
 rawHist :: [Int] -> [(Int, Int)]
 rawHist samples =
     map histify $ group $ sort $ samples ++ [smallest..largest]
@@ -57,7 +65,7 @@ plotTimeSeries samples = do
   let samplePoints = zip [(1::Int)..] samples
   let zoomedPoints =
           zip [0, nSamples `div` 100 ..] $
-              take 100 $ drop (nSamples `div` 3) samples
+              takeSpan (nSamples `div` 3) 100 samples
   let allPlot =
           toPlot $
           plot_points_style .~ filledCircles 0.5 (opaque green) $
@@ -89,6 +97,31 @@ plotSampleHist nBins samples = do
           def
   layoutToRenderable histLayout
 
+plotSampleDFT :: [Int] -> Renderable (LayoutPick Double Double Double)
+plotSampleDFT samples = do
+  let dftPlot =
+          plotBars $
+          plot_bars_values .~ sampleBars $
+          plot_bars_titles .~ ["rel. freq."] $
+          def
+  let dftLayout =
+          layout_title .~ "DFT (magnitude)" $
+          layout_plots .~ [dftPlot] $
+          def
+  layoutToRenderable dftLayout
+  where
+    nSamples = length samples
+    dftLength = min 10000 nSamples
+    dftStart = (nSamples - dftLength) `div` 3
+    dftSamples = takeSpan dftStart dftLength samples
+    normalizedSamples =
+        map norm dftSamples
+        where
+          dftDC = average dftSamples
+          norm sample = fromIntegral sample - dftDC
+    sampleBars =
+        map (\(x, y) -> (x, [y])) $ zip [0..] $ sampleDFT normalizedSamples
+
 entropy :: [(Int, Int)] -> Double
 entropy samples =
     negate $ sum $ map binEntropy samples
@@ -100,12 +133,20 @@ entropy samples =
           where
             p = fromIntegral count / fromIntegral nStates
 
+sampleDFT :: [Double] -> [Double]
+sampleDFT samples =
+    map magnitude $ V.toList $ run dftR2C $ V.fromList samples
+
+average :: Integral a => [a] -> Double
+average samples =
+    fromIntegral (sum samples) / fromIntegral (length samples)
+
 showStats :: Int -> [Int] -> String
 showStats nBits samples =
   printf "min: %d  max: %d  mean: %0.3g  byte-entropy: %0.3g\n"
       (minimum samples)
       (maximum samples)
-      (fromIntegral (sum samples) / fromIntegral nSamples :: Double)
+      (average samples)
       (entropyAdj * entropy (rawHist samples))
   where
     nSamples = length samples
@@ -115,12 +156,14 @@ analyze :: String -> Int -> [Int] -> IO ()
 analyze what nBits samples = do
   writeFile (analysisFile what "stats" "txt") $
     showStats nBits samples
+  writeFile (analysisFile what "hist" "txt") $
+    showHist $ rawHist samples
   pdfRender (analysisFile what "ts" "pdf") $
     plotTimeSeries samples
   pdfRender (analysisFile what "hist" "pdf") $
     plotSampleHist (2 ^ nBits) samples
-  writeFile (analysisFile what "hist" "txt") $
-    showHist $ rawHist samples
+  pdfRender (analysisFile what "dft" "pdf") $
+    plotSampleDFT samples
 
 main :: IO ()
 main = do
