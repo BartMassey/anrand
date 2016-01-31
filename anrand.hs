@@ -9,11 +9,13 @@ import Data.Complex
 import qualified Data.Vector.Unboxed as V
 import Numeric.FFT.Vector.Unnormalized
 
+import Control.Monad
 import Data.Bits
 import qualified Data.ByteString as B
 import Data.List
 import System.Directory
 import System.FilePath
+import System.Random
 import Text.Printf
 
 analysisDir :: FilePath
@@ -84,25 +86,32 @@ plotTimeSeries samples = do
           def
   layoutToRenderable tsLayout
 
-plotSampleHist :: Int -> [Int] -> Renderable (LayoutPick Double Int Int)
+plotSampleHist :: Int -> [Int] -> Renderable (LayoutPick Int Int Int)
 plotSampleHist nBins samples = do
   let histPlot =
-          histToPlot $
-          plot_hist_title .~ "Sample Histogram" $
-          plot_hist_bins .~ nBins $
-          plot_hist_values .~  map fromIntegral samples $
-          (defaultPlotHist :: PlotHist Double Int)
+          plotBars $
+          plot_bars_titles .~ ["Sample Histogram"] $
+          plot_bars_values .~  sampleBars ++ [(nBins, [0])] $
+          plot_bars_item_styles .~ [(FillStyleSolid (opaque red), Nothing)] $
+          plot_bars_spacing .~ BarsFixGap 0 0 $
+          plot_bars_alignment .~ BarsLeft $
+          def
   let histLayout =
           layout_plots .~ [histPlot] $
           def
   layoutToRenderable histLayout
+  where
+    sampleBars =
+        map (\(x, y) -> (x, [y])) $ rawHist samples
 
 plotSampleDFT :: [Int] -> Renderable (LayoutPick Double Double Double)
 plotSampleDFT samples = do
   let dftPlot =
           plotBars $
+          plot_bars_spacing .~ BarsFixWidth 0.1 $
           plot_bars_values .~ sampleBars $
-          plot_bars_titles .~ ["rel. freq."] $
+          plot_bars_titles .~ ["Relative Frequencies"] $
+          plot_bars_item_styles .~ [(FillStyleSolid (opaque red), Nothing)] $
           def
   let dftLayout =
           layout_title .~ "DFT (magnitude)" $
@@ -182,3 +191,6 @@ main = do
 
   let twoBitSamples = map (.&. 0x03) samples
   analyze "twobit" 2 twoBitSamples
+
+  prngSamples <- replicateM (length samples) (randomRIO (0, 2047) :: IO Int)
+  analyze "prng" 12 prngSamples
