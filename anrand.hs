@@ -1,3 +1,10 @@
+-- Copyright © 2016 Bart Massey
+-- [This work is made available under the "MIT License".
+-- Please see the file LICENSE in this distribution for
+-- license details.]
+
+-- Analysis tool for a Hardware Random Number Generator
+
 import Control.Lens
 import Data.Colour
 import Data.Colour.Names
