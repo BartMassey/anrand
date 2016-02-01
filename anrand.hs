@@ -94,12 +94,16 @@ plotTimeSeries samples = do
           def
   layoutToRenderable tsLayout
 
+barStyle :: (FillStyle, Maybe LineStyle)
+barStyle = (FillStyleSolid (opaque gray),
+            Just (line_width .~ 0.05 $ line_color .~ opaque black $ def))
+
 plotSampleHist :: Int -> [Int] -> Renderable (LayoutPick Int Int Int)
 plotSampleHist nBins samples = do
   let histPlot =
           plotBars $
           plot_bars_values .~  sampleBars ++ [(nBins, [0])] $
-          plot_bars_item_styles .~ [(FillStyleSolid (opaque red), Nothing)] $
+          plot_bars_item_styles .~ [barStyle] $
           plot_bars_spacing .~ BarsFixGap 0 0 $
           plot_bars_alignment .~ BarsLeft $
           def
@@ -121,7 +125,7 @@ plotSampleDFT bias samples = do
           plotBars $
           plot_bars_spacing .~ BarsFixWidth 0.1 $
           plot_bars_values .~ dftBars $
-          plot_bars_item_styles .~ [(FillStyleSolid (opaque red), Nothing)] $
+          plot_bars_item_styles .~ [barStyle] $
           def
   let dftLayout =
           layout_x_axis .~ (laxis_title .~ "frequency" $ def) $
@@ -142,8 +146,10 @@ plotSampleDFT bias samples = do
               where
                 dftDC = 
                     case bias of
-                      BiasNominal nBits -> fromIntegral (2 ^ (nBits - 1) - 1)
-                      BiasDebiased -> average dftSamples
+                      BiasNominal nBits ->
+                          fromIntegral (2 ^ (nBits - 1) - 1 :: Integer)
+                      BiasDebiased ->
+                          average dftSamples
     dftBars = map (\(x, y) -> (x, [y])) $ zip [0..] targetDFT
 
 entropy :: [(Int, Int)] -> Double
@@ -173,7 +179,6 @@ showStats nBits samples =
       (average samples)
       (entropyAdj * entropy (rawHist samples))
   where
-    nSamples = length samples
     entropyAdj = max 1.0 $ 8.0 / fromIntegral nBits
 
 analyze :: String -> Int -> [Int] -> IO ()
