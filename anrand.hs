@@ -21,6 +21,7 @@ import Data.Bits
 import qualified Data.ByteString as B
 import Data.List
 import System.Directory
+import System.Environment
 import System.FilePath
 import System.Random
 import Text.Printf
@@ -94,10 +95,6 @@ plotTimeSeries samples = do
           def
   layoutToRenderable tsLayout
 
-barStyle :: (FillStyle, Maybe LineStyle)
-barStyle = (FillStyleSolid (opaque gray),
-            Just (line_width .~ 0.05 $ line_color .~ opaque black $ def))
-
 plotSampleHist :: Int -> [Int] -> Renderable (LayoutPick Int Int Int)
 plotSampleHist nBins samples = do
   let histPlot =
@@ -116,11 +113,11 @@ plotSampleHist nBins samples = do
   where
     sampleBars =
         map (\(x, y) -> (x, [y])) $ rawHist samples
+    barStyle = (FillStyleSolid (opaque gray),
+                Just (line_width .~ 0.05 $ line_color .~ opaque black $ def))
 
-data Bias = BiasNominal Int | BiasDebiased
-
-plotSampleDFT :: Bias -> [Int] -> Renderable (LayoutPick Double Double Double)
-plotSampleDFT bias samples = do
+plotSampleDFT :: [Double] -> Renderable (LayoutPick Double Double Double)
+plotSampleDFT dftBins = do
   let dftPlot =
           plotBars $
           plot_bars_spacing .~ BarsFixWidth 0.1 $
@@ -134,42 +131,77 @@ plotSampleDFT bias samples = do
           def
   layoutToRenderable dftLayout
   where
-    nSamples = length samples
-    dftLength = min 10000 nSamples
-    dftStart = (nSamples - dftLength) `div` 3
-    dftSamples = takeSpan dftStart dftLength samples
-    targetDFT =
-        sampleDFT $ map norm dftSamples
-        where
-          norm sample =
-              (fromIntegral sample - dftDC) / fromIntegral nSamples
-              where
-                dftDC = 
-                    case bias of
-                      BiasNominal nBits ->
-                          fromIntegral (2 ^ (nBits - 1) - 1 :: Integer)
-                      BiasDebiased ->
-                          average dftSamples
-    dftBars = map (\(x, y) -> (x, [y])) $ zip [0..] targetDFT
+    dftBars = map (\(x, y) -> (x, [y])) $ zip [0..] dftBins
+    barStyle = (FillStyleSolid (opaque gray), Nothing)
 
-entropy :: [(Int, Int)] -> Double
+entropy :: Real a => [a] -> Double
 entropy samples =
     negate $ sum $ map binEntropy samples
     where
-      nStates = sum $ map snd samples
-      binEntropy (_, 0) = 0
-      binEntropy (_, count) =
+      weight = realToFrac $ sum samples
+      binEntropy 0 = 0
+      binEntropy count =
           p * logBase 2 p
           where
-            p = fromIntegral count / fromIntegral nStates
+            p = realToFrac count / weight
+
+trapWindow :: Int -> [Double]
+trapWindow nSamples =
+    ramp ++
+    replicate (nSamples - 2 * xq - 2) 1.0 ++
+    reverse ramp
+    where
+      xq = nSamples `div` 4
+      ramp = [0, 1.0 / fromIntegral xq .. 1.0]
 
 sampleDFT :: [Double] -> [Double]
 sampleDFT samples =
     map magnitude $ V.toList $ run dftR2C $ V.fromList samples
 
-average :: Integral a => [a] -> Double
+data Bias = BiasDebiased | BiasNominal Int
+data DFTMode = DFTModeRaw | DFTModeProper Int
+
+processDFT :: Bias -> DFTMode -> [Int] -> [Double]
+processDFT bias dftMode samples =
+    case dftMode of
+      DFTModeRaw ->
+          sampleDFT dftSamples
+          where
+            dftStart = (nSamples - dftLength) `div` 3
+            dftLength = min 10000 nSamples
+            dftSamples = takeSpan dftStart dftLength normedSamples
+      DFTModeProper windowSize ->
+        avgBins $ map (sampleDFT . applyWindow) $
+          splitSamples normedSamples
+        where
+          applyWindow xs =
+              zipWith (*) xs $ trapWindow windowSize
+          splitSamples xs
+              | length first < windowSize = []
+              | otherwise =
+                  first : splitSamples rest
+              where
+                (first, rest) = splitAt windowSize xs
+          avgBins bins =
+              map average $ transpose bins
+    where
+      nSamples = length samples
+      normedSamples =
+          map norm samples
+          where
+            norm sample =
+                (fromIntegral sample - dftDC) / fromIntegral nSamples
+                where
+                  dftDC = 
+                      case bias of
+                        BiasNominal nBits ->
+                            fromIntegral (2 ^ (nBits - 1) - 1 :: Integer)
+                        BiasDebiased ->
+                            average samples
+
+average :: Real a => [a] -> Double
 average samples =
-    fromIntegral (sum samples) / fromIntegral (length samples)
+    realToFrac (sum samples) / fromIntegral (length samples)
 
 showStats :: Int -> [Int] -> String
 showStats nBits samples =
@@ -177,12 +209,14 @@ showStats nBits samples =
       (minimum samples)
       (maximum samples)
       (average samples)
-      (entropyAdj * entropy (rawHist samples))
+      (entropyAdj * entropy (map snd $ rawHist samples))
   where
     entropyAdj = max 1.0 $ 8.0 / fromIntegral nBits
 
 analyze :: String -> Int -> [Int] -> IO ()
 analyze what nBits samples = do
+  let rDFT = processDFT BiasDebiased DFTModeRaw samples
+  let wDFT = processDFT BiasDebiased (DFTModeProper 1024) samples
   writeFile (analysisFile what "stats" "txt") $
     showStats nBits samples
   writeFile (analysisFile what "hist" "txt") $
@@ -191,13 +225,16 @@ analyze what nBits samples = do
     plotTimeSeries samples
   pdfRender (analysisFile what "hist" "pdf") $
     plotSampleHist (2 ^ nBits) samples
-  pdfRender (analysisFile what "rdft" "pdf") $
-    plotSampleDFT (BiasNominal nBits) samples
   pdfRender (analysisFile what "dft" "pdf") $
-    plotSampleDFT BiasDebiased samples
+    plotSampleDFT rDFT
+  pdfRender (analysisFile what "wdft" "pdf") $
+    plotSampleDFT wDFT
 
 main :: IO ()
 main = do
+  argv <- getArgs
+  when (length argv > 0) (error "usage: anrand <randombits")
+
   createDirectoryIfMissing True analysisDir
 
   rawSamples <- B.getContents
