@@ -120,7 +120,7 @@ plotSampleDFT :: [Double] -> Renderable (LayoutPick Double Double Double)
 plotSampleDFT dftBins = do
   let dftPlot =
           plotBars $
-          plot_bars_spacing .~ BarsFixWidth 0.1 $
+          plot_bars_spacing .~ BarsFixWidth 0.3 $
           plot_bars_values .~ dftBars $
           plot_bars_item_styles .~ [barStyle] $
           def
@@ -132,7 +132,7 @@ plotSampleDFT dftBins = do
   layoutToRenderable dftLayout
   where
     dftBars = map (\(x, y) -> (x, [y])) $ zip [0..] dftBins
-    barStyle = (FillStyleSolid (opaque gray), Nothing)
+    barStyle = (FillStyleSolid (opaque black), Nothing)
 
 entropy :: Real a => [a] -> Double
 entropy samples =
@@ -159,7 +159,7 @@ sampleDFT samples =
     map magnitude $ V.toList $ run dftR2C $ V.fromList samples
 
 data Bias = BiasDebiased | BiasNominal Int
-data DFTMode = DFTModeRaw | DFTModeProper Int
+data DFTMode = DFTModeRaw | DFTModeProper Int Int
 
 processDFT :: Bias -> DFTMode -> [Int] -> [Double]
 processDFT bias dftMode samples =
@@ -170,9 +170,9 @@ processDFT bias dftMode samples =
             dftStart = (nSamples - dftLength) `div` 3
             dftLength = min 10000 nSamples
             dftSamples = takeSpan dftStart dftLength normedSamples
-      DFTModeProper windowSize ->
+      DFTModeProper windowSize interpolationSize ->
         avgBins $ map (sampleDFT . applyWindow) $
-          splitSamples normedSamples
+          splitSamples $ interpolateSamples normedSamples
         where
           applyWindow xs =
               zipWith (*) xs $ trapWindow windowSize
@@ -182,6 +182,11 @@ processDFT bias dftMode samples =
                   first : splitSamples rest
               where
                 (first, rest) = splitAt windowSize xs
+          interpolateSamples xs =
+              intercalate zeros $ map (:[]) $ scaleS xs
+              where
+                zeros = replicate (interpolationSize - 1) 0.0
+                scaleS ys = map (* fromIntegral interpolationSize) ys
           avgBins bins =
               map average $ transpose bins
     where
@@ -216,7 +221,7 @@ showStats nBits samples =
 analyze :: String -> Int -> [Int] -> IO ()
 analyze what nBits samples = do
   let rDFT = processDFT BiasDebiased DFTModeRaw samples
-  let wDFT = processDFT BiasDebiased (DFTModeProper 1024) samples
+  let wDFT = processDFT BiasDebiased (DFTModeProper 1024 4) samples
   writeFile (analysisFile what "stats" "txt") $
     showStats nBits samples
   writeFile (analysisFile what "hist" "txt") $
