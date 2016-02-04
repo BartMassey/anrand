@@ -154,12 +154,29 @@ trapWindow nSamples =
       xq = nSamples `div` 4
       ramp = [0, 1.0 / fromIntegral xq .. 1.0]
 
+hannWindow :: Int -> [Double]
+hannWindow nSamples =
+    map hannFunction [0 .. nSamples - 1]
+    where
+      hannFunction n =
+          0.5 * (1.0 - cos(2 * pi * fromIntegral n / nn))
+          where
+            nn = fromIntegral (nSamples - 1)
+
+interpolate :: Int -> [Double] -> [Double]
+interpolate n xs =
+    intercalate zeros $ map (:[]) $ scaleS xs
+    where
+      zeros = replicate (n - 1) 0.0
+      scaleS ys = map (* fromIntegral n) ys
+
 sampleDFT :: [Double] -> [Double]
 sampleDFT samples =
     map magnitude $ V.toList $ run dftR2C $ V.fromList samples
 
 data Bias = BiasDebiased | BiasNominal Int
-data DFTMode = DFTModeRaw | DFTModeProper Int Int
+data DFTMode = DFTModeRaw |
+               DFTModeProper Int (Int -> [Double]) ([Double] -> [Double])
 
 processDFT :: Bias -> DFTMode -> [Int] -> [Double]
 processDFT bias dftMode samples =
@@ -170,23 +187,18 @@ processDFT bias dftMode samples =
             dftStart = (nSamples - dftLength) `div` 3
             dftLength = min 10000 nSamples
             dftSamples = takeSpan dftStart dftLength normedSamples
-      DFTModeProper windowSize interpolationSize ->
+      DFTModeProper windowSize window interp ->
         avgBins $ map (sampleDFT . applyWindow) $
-          splitSamples $ interpolateSamples normedSamples
+          splitSamples $ interp normedSamples
         where
           applyWindow xs =
-              zipWith (*) xs $ trapWindow windowSize
+              zipWith (*) xs $ window windowSize
           splitSamples xs
               | length first < windowSize = []
               | otherwise =
                   first : splitSamples rest
               where
                 (first, rest) = splitAt windowSize xs
-          interpolateSamples xs =
-              intercalate zeros $ map (:[]) $ scaleS xs
-              where
-                zeros = replicate (interpolationSize - 1) 0.0
-                scaleS ys = map (* fromIntegral interpolationSize) ys
           avgBins bins =
               map average $ transpose bins
     where
@@ -221,7 +233,8 @@ showStats nBits samples =
 analyze :: String -> Int -> [Int] -> IO ()
 analyze what nBits samples = do
   let rDFT = processDFT BiasDebiased DFTModeRaw samples
-  let wDFT = processDFT BiasDebiased (DFTModeProper 1024 4) samples
+  let wDFT = processDFT BiasDebiased
+               (DFTModeProper 1024 hannWindow (interpolate 4)) samples
   writeFile (analysisFile what "stats" "txt") $
     showStats nBits samples
   writeFile (analysisFile what "hist" "txt") $
