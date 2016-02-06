@@ -145,15 +145,6 @@ entropy samples =
           where
             p = realToFrac count / weight
 
-trapWindow :: Int -> [Double]
-trapWindow nSamples =
-    ramp ++
-    replicate (nSamples - 2 * xq - 2) 1.0 ++
-    reverse ramp
-    where
-      xq = nSamples `div` 4
-      ramp = [0, 1.0 / fromIntegral xq .. 1.0]
-
 hannWindow :: Int -> [Double]
 hannWindow nSamples =
     map hannFunction [0 .. nSamples - 1]
@@ -162,13 +153,6 @@ hannWindow nSamples =
           0.5 * (1.0 - cos(2 * pi * fromIntegral n / nn))
           where
             nn = fromIntegral (nSamples - 1)
-
-interpolate :: Int -> [Double] -> [Double]
-interpolate n xs =
-    intercalate zeros $ map (:[]) $ scaleS xs
-    where
-      zeros = replicate (n - 1) 0.0
-      scaleS ys = map (* fromIntegral n) ys
 
 sampleDFT :: [Double] -> [Double]
 sampleDFT samples =
@@ -234,7 +218,7 @@ analyze :: String -> Int -> [Int] -> IO ()
 analyze what nBits samples = do
   let rDFT = processDFT BiasDebiased DFTModeRaw samples
   let wDFT = processDFT BiasDebiased
-               (DFTModeProper 1024 hannWindow (interpolate 4)) samples
+               (DFTModeProper 512 hannWindow id) samples
   writeFile (analysisFile what "stats" "txt") $
     showStats nBits samples
   writeFile (analysisFile what "hist" "txt") $
