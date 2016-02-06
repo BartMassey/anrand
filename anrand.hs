@@ -134,11 +134,16 @@ plotSampleDFT dftBins = do
     dftBars = map (\(x, y) -> (x, [y])) $ zip [0..] dftBins
     barStyle = (FillStyleSolid (opaque black), Nothing)
 
-entropy :: Real a => [a] -> Double
-entropy samples =
+data EntropyMode = EntropyModeRaw | EntropyModeNormalized
+
+entropy :: Real a => EntropyMode -> [a] -> Double
+entropy mode samples =
     negate $ sum $ map binEntropy samples
     where
-      weight = realToFrac $ sum samples
+      weight =
+          case mode of
+            EntropyModeRaw -> 1.0
+            EntropyModeNormalized -> realToFrac $ sum samples
       binEntropy 0 = 0
       binEntropy count =
           p * logBase 2 p
@@ -204,15 +209,21 @@ average :: Real a => [a] -> Double
 average samples =
     realToFrac (sum samples) / fromIntegral (length samples)
 
-showStats :: Int -> [Int] -> String
-showStats nBits samples =
-  printf "min: %d  max: %d  mean: %0.3g  byte-entropy: %0.3g\n"
-      (minimum samples)
-      (maximum samples)
-      (average samples)
-      (entropyAdj * entropy (map snd $ rawHist samples))
+showStats :: Int -> [Int] -> [Double] -> String
+showStats nBits samples rDFT = unlines [
+  printf "min: %d" (minimum samples),
+  printf "max: %d" (maximum samples),
+  printf "mean: %0.3g" (average samples),
+  printf "byte-entropy: %0.3g"
+      (entropyAdj * entropy EntropyModeNormalized hist),
+  printf "byte-spectral-entropy: %0.3g"
+      (spectralEntropyAdj * entropy EntropyModeNormalized rDFT2) ]
   where
+    hist = map snd $ rawHist samples
+    rDFT2 = map (**2.0) $ tail rDFT
     entropyAdj = max 1.0 $ 8.0 / fromIntegral nBits
+    spectralEntropyAdj =
+        entropyAdj / logBase 2.0 (fromIntegral (length rDFT2))
 
 analyze :: String -> Int -> [Int] -> IO ()
 analyze what nBits samples = do
@@ -220,7 +231,7 @@ analyze what nBits samples = do
   let wDFT = processDFT BiasDebiased
                (DFTModeProper 512 hannWindow id) samples
   writeFile (analysisFile what "stats" "txt") $
-    showStats nBits samples
+    showStats nBits samples rDFT
   writeFile (analysisFile what "hist" "txt") $
     showHist $ rawHist samples
   pdfRender (analysisFile what "ts" "pdf") $
