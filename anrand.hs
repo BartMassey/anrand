@@ -209,6 +209,15 @@ average :: Real a => [a] -> Double
 average samples =
     realToFrac (sum samples) / fromIntegral (length samples)
 
+spectralFlatness :: [Double] -> Double
+spectralFlatness rDFT =
+    10.0 * (gMeanDB - aMeanDB)
+    where
+      xDFT = tail rDFT
+      nxDFT = fromIntegral (length xDFT)
+      gMeanDB = sum (map (logBase 10) xDFT) / nxDFT
+      aMeanDB = logBase 10 (sum xDFT) - logBase 10 nxDFT
+
 showStats :: Int -> [Int] -> [Double] -> String
 showStats nBits samples rDFT = unlines [
   printf "min: %d" (minimum samples),
@@ -216,14 +225,17 @@ showStats nBits samples rDFT = unlines [
   printf "mean: %0.3g" (average samples),
   printf "byte-entropy: %0.3g"
       (entropyAdj * entropy EntropyModeNormalized hist),
-  printf "byte-spectral-entropy: %0.3g"
-      (spectralEntropyAdj * entropy EntropyModeNormalized rDFT2) ]
+  printf "spectral-entropy: %0.3g"
+      (spectralEntropyAdj * entropy EntropyModeNormalized rDFT2),
+  printf "spectral-flatness-db: %0.3g"
+      (spectralFlatness rDFT2) ]
   where
     hist = map snd $ rawHist samples
     rDFT2 = map (**2.0) $ tail rDFT
-    entropyAdj = max 1.0 $ 8.0 / fromIntegral nBits
+    entropyAdj =
+        max 1.0 $ 8.0 / fromIntegral nBits
     spectralEntropyAdj =
-        entropyAdj / logBase 2.0 (fromIntegral (length rDFT2))
+        fromIntegral (max 8 nBits)  / logBase 2.0 (fromIntegral (length rDFT2))
 
 analyze :: Bool -> String -> Int -> [Int] -> IO ()
 analyze statsOnly what nBits samples = do
