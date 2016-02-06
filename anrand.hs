@@ -29,6 +29,9 @@ import Text.Printf
 analysisDir :: FilePath
 analysisDir = "analysis"
 
+wWindowSize :: Int
+wWindowSize = 4096
+
 analysisFile :: FilePath -> String -> String-> FilePath
 analysisFile what suff ext =
     joinPath [analysisDir, addExtension (what ++ "-" ++ suff) ext]
@@ -241,7 +244,7 @@ analyze :: Bool -> String -> Int -> [Int] -> IO ()
 analyze statsOnly what nBits samples = do
   let rDFT = processDFT BiasDebiased DFTModeRaw samples
   let wDFT = processDFT BiasDebiased
-               (DFTModeProper 512 hannWindow) samples
+               (DFTModeProper wWindowSize hannWindow) samples
   writeFile (analysisFile what "stats" "txt") $
     showStats nBits samples rDFT wDFT
   when (not statsOnly) $ do
