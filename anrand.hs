@@ -165,7 +165,7 @@ sampleDFT samples =
 
 data Bias = BiasDebiased | BiasNominal Int
 data DFTMode = DFTModeRaw |
-               DFTModeProper Int (Int -> [Double]) ([Double] -> [Double])
+               DFTModeProper Int (Int -> [Double])
 
 processDFT :: Bias -> DFTMode -> [Int] -> [Double]
 processDFT bias dftMode samples =
@@ -176,9 +176,9 @@ processDFT bias dftMode samples =
             dftStart = (nSamples - dftLength) `div` 3
             dftLength = min 10000 nSamples
             dftSamples = takeSpan dftStart dftLength normedSamples
-      DFTModeProper windowSize window interp ->
+      DFTModeProper windowSize window ->
         avgBins $ map (sampleDFT . applyWindow) $
-          splitSamples $ interp normedSamples
+          splitSamples normedSamples
         where
           applyWindow xs =
               zipWith (*) xs $ window windowSize
@@ -218,8 +218,8 @@ spectralFlatness rDFT =
       gMeanDB = sum (map (logBase 10) xDFT) / nxDFT
       aMeanDB = logBase 10 (sum xDFT) - logBase 10 nxDFT
 
-showStats :: Int -> [Int] -> [Double] -> String
-showStats nBits samples rDFT = unlines [
+showStats :: Int -> [Int] -> [Double] -> [Double] -> String
+showStats nBits samples rDFT wDFT = unlines [
   printf "min: %d" (minimum samples),
   printf "max: %d" (maximum samples),
   printf "mean: %0.3g" (average samples),
@@ -227,8 +227,8 @@ showStats nBits samples rDFT = unlines [
       (entropyAdj * entropy EntropyModeNormalized hist),
   printf "spectral-entropy: %0.3g"
       (spectralEntropyAdj * entropy EntropyModeNormalized rDFT2),
-  printf "spectral-flatness-db: %0.3g"
-      (spectralFlatness rDFT2) ]
+  printf "spectral-flatness-db: %0.3g" (spectralFlatness rDFT),
+  printf "avg-spectral-flatness-db: %0.3g" (spectralFlatness wDFT) ]
   where
     hist = map snd $ rawHist samples
     rDFT2 = map (**2.0) $ tail rDFT
@@ -241,9 +241,9 @@ analyze :: Bool -> String -> Int -> [Int] -> IO ()
 analyze statsOnly what nBits samples = do
   let rDFT = processDFT BiasDebiased DFTModeRaw samples
   let wDFT = processDFT BiasDebiased
-               (DFTModeProper 512 hannWindow id) samples
+               (DFTModeProper 512 hannWindow) samples
   writeFile (analysisFile what "stats" "txt") $
-    showStats nBits samples rDFT
+    showStats nBits samples rDFT wDFT
   when (not statsOnly) $ do
     writeFile (analysisFile what "hist" "txt") $
       showHist $ rawHist samples
