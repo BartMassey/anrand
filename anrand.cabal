@@ -41,17 +41,18 @@ executable anrand
   main-is:             anrand.hs
   
   build-depends:       base >=4.8 && <5,
-                       lens >=4.13 && <5,
-                       colour >=2.3 && <3,
-                       data-default-class <1,
+                       bytestring >=0.10 && <1,
                        Chart >=1.5 && <2,
                        Chart-cairo >=1.5 && <2,
-                       bytestring >=0.10 && <1,
+                       colour >=2.3 && <3,
+                       data-default-class <1,
                        directory >=1.2 && <2,
                        filepath >=1.4 && <2,
+                       lens >=4.13 && <5,
+                       parseargs >=0.2 && <1,
+                       random >=1.1 && <2,
                        vector >=0.11 && <1,
-                       vector-fftw >=0.1 && <1,
-                       random >=1.1 && <2
+                       vector-fftw >=0.1 && <1
                        
   default-language:    Haskell2010
   

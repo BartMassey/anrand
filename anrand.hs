@@ -20,8 +20,8 @@ import Control.Monad
 import Data.Bits
 import qualified Data.ByteString as B
 import Data.List
+import System.Console.ParseArgs
 import System.Directory
-import System.Environment
 import System.FilePath
 import System.Random
 import Text.Printf
@@ -225,44 +225,66 @@ showStats nBits samples rDFT = unlines [
     spectralEntropyAdj =
         entropyAdj / logBase 2.0 (fromIntegral (length rDFT2))
 
-analyze :: String -> Int -> [Int] -> IO ()
-analyze what nBits samples = do
+analyze :: Bool -> String -> Int -> [Int] -> IO ()
+analyze statsOnly what nBits samples = do
   let rDFT = processDFT BiasDebiased DFTModeRaw samples
   let wDFT = processDFT BiasDebiased
                (DFTModeProper 512 hannWindow id) samples
   writeFile (analysisFile what "stats" "txt") $
     showStats nBits samples rDFT
-  writeFile (analysisFile what "hist" "txt") $
-    showHist $ rawHist samples
-  pdfRender (analysisFile what "ts" "pdf") $
-    plotTimeSeries samples
-  pdfRender (analysisFile what "hist" "pdf") $
-    plotSampleHist (2 ^ nBits) samples
-  pdfRender (analysisFile what "dft" "pdf") $
-    plotSampleDFT rDFT
-  pdfRender (analysisFile what "wdft" "pdf") $
-    plotSampleDFT wDFT
+  when (not statsOnly) $ do
+    writeFile (analysisFile what "hist" "txt") $
+      showHist $ rawHist samples
+    pdfRender (analysisFile what "ts" "pdf") $
+      plotTimeSeries samples
+    pdfRender (analysisFile what "hist" "pdf") $
+      plotSampleHist (2 ^ nBits) samples
+    pdfRender (analysisFile what "dft" "pdf") $
+      plotSampleDFT rDFT
+    pdfRender (analysisFile what "wdft" "pdf") $
+      plotSampleDFT wDFT
+
+data ArgIndex = ArgIndexBitsFile
+              | ArgIndexStatsOnly
+                deriving (Eq, Ord, Show)
+
+argd :: [Arg ArgIndex]
+argd = [
+  Arg {
+    argIndex = ArgIndexStatsOnly,
+    argName = Just "stats-only",
+    argAbbr = Just 's',
+    argData = Nothing,
+    argDesc = "Just compute statistics" },
+  Arg {
+    argIndex = ArgIndexBitsFile,
+    argName = Nothing,
+    argAbbr = Nothing,
+    argData = argDataOptional "bits-file" ArgtypeString,
+    argDesc = "Random bits." } ]
 
 main :: IO ()
 main = do
-  argv <- getArgs
-  when (length argv > 0) (error "usage: anrand <randombits")
+  args <- parseArgsIO ArgsComplete argd
+
+  let statsOnly = gotArg args ArgIndexStatsOnly
+
+  bitsFile <- getArgStdio args ArgIndexBitsFile ReadMode
+  rawSamples <- B.hGetContents bitsFile
+  let samples = readSamples rawSamples
 
   createDirectoryIfMissing True analysisDir
 
-  rawSamples <- B.getContents
-  let samples = readSamples rawSamples
-
-  analyze "raw" 12 samples
-
-  let lowSamples = map (.&. 0xff) samples
-  analyze "low" 8 lowSamples
-
-  let midSamples = map ((.&. 0xff) . (`shiftR` 1)) samples
-  analyze "mid" 8 midSamples
-
-  let twoBitSamples = map (.&. 0x03) samples
-  analyze "twobit" 2 twoBitSamples
+  analyze statsOnly "raw" 12 samples
 
   prngSamples <- replicateM (length samples) (randomRIO (0, 4095) :: IO Int)
-  analyze "prng" 12 prngSamples
+  analyze statsOnly "prng" 12 prngSamples
+
+  let twoBitSamples = map (.&. 0x03) samples
+  analyze statsOnly "twobit" 2 twoBitSamples
+
+  let midSamples = map ((.&. 0xff) . (`shiftR` 1)) samples
+  analyze statsOnly "mid" 8 midSamples
+
+  let lowSamples = map (.&. 0xff) samples
+  analyze statsOnly "low" 8 lowSamples
