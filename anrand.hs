@@ -26,15 +26,15 @@ import System.FilePath
 import System.Random
 import Text.Printf
 
-analysisDir :: FilePath
-analysisDir = "analysis"
+defaultAnalysisDir :: FilePath
+defaultAnalysisDir = "analysis"
 
 wWindowSize :: Int
 wWindowSize = 4096
 
-analysisFile :: FilePath -> String -> String-> FilePath
-analysisFile what suff ext =
-    joinPath [analysisDir, addExtension (what ++ "-" ++ suff) ext]
+analysisFile :: FilePath -> FilePath -> String -> String-> FilePath
+analysisFile dir what suff ext =
+    joinPath [dir, addExtension (what ++ "-" ++ suff) ext]
 
 pdfRender :: String -> Renderable a -> IO ()
 pdfRender name r = do
@@ -240,27 +240,25 @@ showStats nBits samples rDFT wDFT = unlines [
     spectralEntropyAdj =
         fromIntegral (max 8 nBits)  / logBase 2.0 (fromIntegral (length rDFT2))
 
-analyze :: Bool -> String -> Int -> [Int] -> IO ()
-analyze statsOnly what nBits samples = do
+analyze :: Bool -> String -> String -> Int -> [Int] -> IO ()
+analyze statsOnly dir what nBits samples = do
   let rDFT = processDFT BiasDebiased DFTModeRaw samples
   let wDFT = processDFT BiasDebiased
                (DFTModeProper wWindowSize hannWindow) samples
-  writeFile (analysisFile what "stats" "txt") $
+  writeFile (af "stats" "txt") $
     showStats nBits samples rDFT wDFT
   when (not statsOnly) $ do
-    writeFile (analysisFile what "hist" "txt") $
-      showHist $ rawHist samples
-    pdfRender (analysisFile what "ts" "pdf") $
-      plotTimeSeries samples
-    pdfRender (analysisFile what "hist" "pdf") $
-      plotSampleHist (2 ^ nBits) samples
-    pdfRender (analysisFile what "dft" "pdf") $
-      plotSampleDFT rDFT
-    pdfRender (analysisFile what "wdft" "pdf") $
-      plotSampleDFT wDFT
+    writeFile (af "hist" "txt") $ showHist $ rawHist samples
+    pdfRender (af "ts" "pdf") $ plotTimeSeries samples
+    pdfRender (af "hist" "pdf") $ plotSampleHist (2 ^ nBits) samples
+    pdfRender (af "dft" "pdf") $ plotSampleDFT rDFT
+    pdfRender (af "wdft" "pdf") $ plotSampleDFT wDFT
+  where
+    af = analysisFile dir what
 
 data ArgIndex = ArgIndexBitsFile
               | ArgIndexStatsOnly
+              | ArgIndexAnalysisDir
                 deriving (Eq, Ord, Show)
 
 argd :: [Arg ArgIndex]
@@ -270,6 +268,12 @@ argd = [
     argName = Just "stats-only",
     argAbbr = Just 's',
     argData = Nothing,
+    argDesc = "Just compute statistics" },
+  Arg {
+    argIndex = ArgIndexAnalysisDir,
+    argName = Just "analysis-dir",
+    argAbbr = Just 'a',
+    argData = argDataDefaulted "dir" ArgtypeString defaultAnalysisDir,
     argDesc = "Just compute statistics" },
   Arg {
     argIndex = ArgIndexBitsFile,
@@ -288,18 +292,19 @@ main = do
   rawSamples <- B.hGetContents bitsFile
   let samples = readSamples rawSamples
 
+  let analysisDir = getRequiredArg args ArgIndexAnalysisDir
   createDirectoryIfMissing True analysisDir
 
-  analyze statsOnly "raw" 12 samples
+  analyze statsOnly analysisDir "raw" 12 samples
 
   prngSamples <- replicateM (length samples) (randomRIO (0, 4095) :: IO Int)
-  analyze statsOnly "prng" 12 prngSamples
+  analyze statsOnly analysisDir "prng" 12 prngSamples
 
   let twoBitSamples = map (.&. 0x03) samples
-  analyze statsOnly "twobit" 2 twoBitSamples
+  analyze statsOnly analysisDir "twobit" 2 twoBitSamples
 
   let midSamples = map ((.&. 0xff) . (`shiftR` 1)) samples
-  analyze statsOnly "mid" 8 midSamples
+  analyze statsOnly analysisDir "mid" 8 midSamples
 
   let lowSamples = map (.&. 0xff) samples
-  analyze statsOnly "low" 8 lowSamples
+  analyze statsOnly analysisDir "low" 8 lowSamples
