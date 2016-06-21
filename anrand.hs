@@ -6,6 +6,7 @@
 -- Analysis tool for a Hardware Random Number Generator
 
 import Control.Lens
+import Data.Char (toLower)
 import Data.Colour
 import Data.Colour.Names
 import Data.Default.Class
@@ -36,9 +37,14 @@ analysisFile :: FilePath -> FilePath -> String -> String-> FilePath
 analysisFile dir what suff ext =
     joinPath [dir, addExtension (what ++ "-" ++ suff) ext]
 
-pdfRender :: String -> Renderable a -> IO ()
-pdfRender name r = do
-    _ <- renderableToFile (fo_format .~ PDF $ def) name r
+plotSuffix :: Maybe FileFormat -> String
+plotSuffix (Just PDF) = "pdf"
+plotSuffix (Just SVG) = "svg"
+plotSuffix _ = error "no suffix for (non)plot format"
+
+plotRender :: FileFormat -> String -> Renderable a -> IO ()
+plotRender ff name r = do
+    _ <- renderableToFile (fo_format .~ ff $ def) name r
     return ()
 
 readSamples :: B.ByteString -> [Int]
@@ -170,6 +176,14 @@ data Bias = BiasDebiased | BiasNominal Int
 data DFTMode = DFTModeRaw |
                DFTModeProper Int (Int -> [Double])
 
+splitSamples :: Int -> [a] -> [[a]]
+splitSamples n xs
+    | length first < n = []
+    | otherwise =
+        first : splitSamples n rest
+    where
+      (first, rest) = splitAt n xs
+
 processDFT :: Bias -> DFTMode -> [Int] -> [Double]
 processDFT bias dftMode samples =
     case dftMode of
@@ -181,16 +195,10 @@ processDFT bias dftMode samples =
             dftSamples = takeSpan dftStart dftLength normedSamples
       DFTModeProper windowSize window ->
         avgBins $ map (sampleDFT . applyWindow) $
-          splitSamples normedSamples
+          splitSamples windowSize normedSamples
         where
           applyWindow xs =
               zipWith (*) xs $ window windowSize
-          splitSamples xs
-              | length first < windowSize = []
-              | otherwise =
-                  first : splitSamples rest
-              where
-                (first, rest) = splitAt windowSize xs
           avgBins bins =
               map average $ transpose bins
     where
@@ -212,6 +220,14 @@ average :: Real a => [a] -> Double
 average samples =
     realToFrac (sum samples) / fromIntegral (length samples)
 
+stdDeviation :: Real a => [a] -> Double
+stdDeviation samples =
+    sqrt (sum devs / fromIntegral (length devs))
+    where
+      devs = map (square . (`subtract` mean) . realToFrac) samples
+      square x = x * x
+      mean = average samples
+
 spectralFlatness :: [Double] -> Double
 spectralFlatness rDFT =
     10.0 * (gMeanDB - aMeanDB)
@@ -221,6 +237,12 @@ spectralFlatness rDFT =
       gMeanDB = sum (map (logBase 10) xDFT) / nxDFT
       aMeanDB = logBase 10 (sum xDFT) - logBase 10 nxDFT
 
+secondMoment64 :: [Int] -> (Double, Double)
+secondMoment64 samples =
+    (minimum devs, maximum devs)
+    where
+      devs = map stdDeviation $ splitSamples 64 samples
+
 showStats :: Int -> [Int] -> [Double] -> [Double] -> String
 showStats nBits samples rDFT wDFT = unlines [
   printf "min: %d" (minimum samples),
@@ -228,53 +250,58 @@ showStats nBits samples rDFT wDFT = unlines [
   printf "mean: %0.3g" (average samples),
   printf "byte-entropy: %0.3g"
       (entropyAdj * entropy EntropyModeNormalized hist),
-  printf "spectral-entropy: %0.3g"
-      (spectralEntropyAdj * entropy EntropyModeNormalized rDFT2),
-  printf "spectral-flatness-db: %0.3g" (spectralFlatness rDFT),
-  printf "avg-spectral-flatness-db: %0.3g" (spectralFlatness wDFT) ]
+  printf "second-moment-64s-min: %0.3g" smMin,
+  printf "second-moment-64s-max: %0.3g" smMax ]
+--  printf "spectral-entropy: %0.3g"
+--      (spectralEntropyAdj * entropy EntropyModeNormalized rDFT2),
+--  printf "spectral-flatness-db: %0.3g" (spectralFlatness rDFT),
+--  printf "avg-spectral-flatness-db: %0.3g" (spectralFlatness wDFT),
   where
+    (smMin, smMax) = secondMoment64 samples
     hist = map snd $ rawHist samples
-    rDFT2 = map (**2.0) $ tail rDFT
+--    rDFT2 = map (**2.0) $ tail rDFT
     entropyAdj =
         max 1.0 $ 8.0 / fromIntegral nBits
-    spectralEntropyAdj =
-        fromIntegral (max 8 nBits)  / logBase 2.0 (fromIntegral (length rDFT2))
+--    spectralEntropyAdj =
+--        fromIntegral (max 8 nBits)  / logBase 2.0 (fromIntegral (length rDFT2))
 
-analyze :: Bool -> String -> String -> Int -> [Int] -> IO ()
-analyze statsOnly dir what nBits samples = do
+analyze :: Maybe FileFormat -> String -> String -> Int -> [Int] -> IO ()
+analyze plotMode dir what nBits samples = do
   let rDFT = processDFT BiasDebiased DFTModeRaw samples
-  let wDFT = processDFT BiasDebiased
-               (DFTModeProper wWindowSize hannWindow) samples
+  let wDFT = processDFT BiasDebiased (DFTModeProper wWindowSize hannWindow) samples
   writeFile (af "stats" "txt") $
     showStats nBits samples rDFT wDFT
-  when (not statsOnly) $ do
-    writeFile (af "hist" "txt") $ showHist $ rawHist samples
-    pdfRender (af "ts" "pdf") $ plotTimeSeries samples
-    pdfRender (af "hist" "pdf") $ plotSampleHist (2 ^ nBits) samples
-    pdfRender (af "dft" "pdf") $ plotSampleDFT rDFT
-    pdfRender (af "wdft" "pdf") $ plotSampleDFT wDFT
+  case plotMode of
+    Just ff -> do
+      writeFile (af "hist" "txt") $ showHist $ rawHist samples
+      plotRender ff (af' "ts") $ plotTimeSeries samples
+      plotRender ff (af' "hist") $ plotSampleHist (2 ^ nBits) samples
+      plotRender ff (af' "dft") $ plotSampleDFT rDFT
+      plotRender ff (af' "wdft") $ plotSampleDFT wDFT
+    Nothing -> return ()
   where
     af = analysisFile dir what
+    af' name = af name (plotSuffix plotMode)
 
 data ArgIndex = ArgIndexBitsFile
-              | ArgIndexStatsOnly
+              | ArgIndexPlotFormat
               | ArgIndexAnalysisDir
                 deriving (Eq, Ord, Show)
 
 argd :: [Arg ArgIndex]
 argd = [
   Arg {
-    argIndex = ArgIndexStatsOnly,
-    argName = Just "stats-only",
-    argAbbr = Just 's',
-    argData = Nothing,
-    argDesc = "Just compute statistics" },
+    argIndex = ArgIndexPlotFormat,
+    argName = Just "plot-format",
+    argAbbr = Just 'p',
+    argData = argDataDefaulted "type" ArgtypeString "pdf",
+    argDesc = "Plot format (\"pdf\", \"svg\", or \"none\" for just stats)" },
   Arg {
     argIndex = ArgIndexAnalysisDir,
     argName = Just "analysis-dir",
     argAbbr = Just 'a',
     argData = argDataDefaulted "dir" ArgtypeString defaultAnalysisDir,
-    argDesc = "Just compute statistics" },
+    argDesc = "Directory for analysis results" },
   Arg {
     argIndex = ArgIndexBitsFile,
     argName = Nothing,
@@ -282,11 +309,17 @@ argd = [
     argData = argDataOptional "bits-file" ArgtypeString,
     argDesc = "Random bits." } ]
 
+
 main :: IO ()
 main = do
   args <- parseArgsIO ArgsComplete argd
 
-  let statsOnly = gotArg args ArgIndexStatsOnly
+  let plotFormat =
+          case map toLower $ getRequiredArg args ArgIndexPlotFormat of
+            "none" -> Nothing
+            "pdf" -> Just PDF
+            "svg" -> Just SVG
+            _ -> error "unrecognized plot format"
 
   bitsFile <- getArgStdio args ArgIndexBitsFile ReadMode
   rawSamples <- B.hGetContents bitsFile
@@ -295,16 +328,18 @@ main = do
   let analysisDir = getRequiredArg args ArgIndexAnalysisDir
   createDirectoryIfMissing True analysisDir
 
-  analyze statsOnly analysisDir "raw" 12 samples
+  let aa = analyze plotFormat analysisDir
+
+  aa "raw" 12 samples
 
   prngSamples <- replicateM (length samples) (randomRIO (0, 4095) :: IO Int)
-  analyze statsOnly analysisDir "prng" 12 prngSamples
+  aa "prng" 12 prngSamples
 
   let twoBitSamples = map (.&. 0x03) samples
-  analyze statsOnly analysisDir "twobit" 2 twoBitSamples
+  aa "twobit" 2 twoBitSamples
 
   let midSamples = map ((.&. 0xff) . (`shiftR` 1)) samples
-  analyze statsOnly analysisDir "mid" 8 midSamples
+  aa "mid" 8 midSamples
 
   let lowSamples = map (.&. 0xff) samples
-  analyze statsOnly analysisDir "low" 8 lowSamples
+  aa "low" 8 lowSamples
