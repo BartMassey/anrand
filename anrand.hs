@@ -251,19 +251,19 @@ showStats nBits samples rDFT wDFT = unlines [
   printf "byte-entropy: %0.3g"
       (entropyAdj * entropy EntropyModeNormalized hist),
   printf "second-moment-64s-min: %0.3g" smMin,
-  printf "second-moment-64s-max: %0.3g" smMax ]
---  printf "spectral-entropy: %0.3g"
---      (spectralEntropyAdj * entropy EntropyModeNormalized rDFT2),
---  printf "spectral-flatness-db: %0.3g" (spectralFlatness rDFT),
---  printf "avg-spectral-flatness-db: %0.3g" (spectralFlatness wDFT),
+  printf "second-moment-64s-max: %0.3g" smMax,
+  printf "spectral-entropy: %0.3g"
+      (spectralEntropyAdj * entropy EntropyModeNormalized rDFT2),
+  printf "spectral-flatness-db: %0.3g" (spectralFlatness rDFT),
+  printf "avg-spectral-flatness-db: %0.3g" (spectralFlatness wDFT) ]
   where
     (smMin, smMax) = secondMoment64 samples
     hist = map snd $ rawHist samples
---    rDFT2 = map (**2.0) $ tail rDFT
+    rDFT2 = map (**2.0) $ tail rDFT
     entropyAdj =
         max 1.0 $ 8.0 / fromIntegral nBits
---    spectralEntropyAdj =
---        fromIntegral (max 8 nBits)  / logBase 2.0 (fromIntegral (length rDFT2))
+    spectralEntropyAdj =
+        fromIntegral (max 8 nBits)  / logBase 2.0 (fromIntegral (length rDFT2))
 
 analyze :: Maybe FileFormat -> String -> String -> Int -> [Int] -> IO ()
 analyze plotMode dir what nBits samples = do
