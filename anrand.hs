@@ -9,7 +9,9 @@ import Control.Lens
 import Data.Char (toLower)
 import Data.Colour
 import Data.Colour.Names
+import Data.Colour.SRGB
 import Data.Default.Class
+import Data.Maybe
 import Graphics.Rendering.Chart
 import Graphics.Rendering.Chart.Backend.Cairo
 
@@ -78,8 +80,11 @@ showHist bins =
     where
       showBin (x, y) = unwords [show x, show y]
 
-plotTimeSeries :: [Int] -> Renderable (LayoutPick Int Int Int)
-plotTimeSeries samples = do
+type ColourPair = (Colour Double, Colour Double)
+
+plotTimeSeries :: ColourPair -> [Int]
+               -> Renderable (LayoutPick Int Int Int)
+plotTimeSeries (color, color2) samples = do
   let nSamples = length samples
   let samplePoints = zip [(1::Int)..] samples
   let zoomedPoints =
@@ -87,13 +92,13 @@ plotTimeSeries samples = do
               takeSpan (nSamples `div` 3) 100 samples
   let allPlot =
           toPlot $
-          plot_points_style .~ filledCircles 0.5 (opaque gray) $
+          plot_points_style .~ filledCircles 0.5 (opaque color2) $
           plot_points_values .~ samplePoints $
           plot_points_title .~ "all" $
           def
   let zoomedPlot =
           toPlot $
-          plot_lines_style . line_color .~ opaque black $
+          plot_lines_style . line_color .~ opaque color $
           plot_lines_values .~ [zoomedPoints] $
           plot_lines_title .~ "zoomed" $
           def
@@ -104,8 +109,9 @@ plotTimeSeries samples = do
           def
   layoutToRenderable tsLayout
 
-plotSampleHist :: Int -> [Int] -> Renderable (LayoutPick Int Int Int)
-plotSampleHist nBins samples = do
+plotSampleHist :: ColourPair -> Int -> [Int]
+               -> Renderable (LayoutPick Int Int Int)
+plotSampleHist (color, _) nBins samples = do
   let histPlot =
           plotBars $
           plot_bars_values .~  sampleBars ++ [(nBins, [0])] $
@@ -123,10 +129,11 @@ plotSampleHist nBins samples = do
     sampleBars =
         map (\(x, y) -> (x, [y])) $ rawHist samples
     barStyle = (FillStyleSolid (opaque gray),
-                Just (line_width .~ 0.05 $ line_color .~ opaque black $ def))
+                Just (line_width .~ 0.05 $ line_color .~ opaque color $ def))
 
-plotSampleDFT :: [Double] -> Renderable (LayoutPick Double Double Double)
-plotSampleDFT dftBins = do
+plotSampleDFT :: ColourPair -> [Double]
+              -> Renderable (LayoutPick Double Double Double)
+plotSampleDFT (color, _) dftBins = do
   let dftPlot =
           plotBars $
           plot_bars_spacing .~ BarsFixWidth 0.3 $
@@ -141,7 +148,7 @@ plotSampleDFT dftBins = do
   layoutToRenderable dftLayout
   where
     dftBars = map (\(x, y) -> (x, [y])) $ zip [0..] dftBins
-    barStyle = (FillStyleSolid (opaque black), Nothing)
+    barStyle = (FillStyleSolid (opaque color), Nothing)
 
 data EntropyMode = EntropyModeRaw | EntropyModeNormalized
 
@@ -265,8 +272,10 @@ showStats nBits samples rDFT wDFT = unlines [
     spectralEntropyAdj =
         fromIntegral (max 8 nBits)  / logBase 2.0 (fromIntegral (length rDFT2))
 
-analyze :: Maybe FileFormat -> String -> String -> Int -> [Int] -> IO ()
-analyze plotMode dir what nBits samples = do
+analyze :: Maybe FileFormat -> ColourPair
+        -> String -> String -> Int -> [Int]
+        -> IO ()
+analyze plotMode colors dir what nBits samples = do
   let rDFT = processDFT BiasDebiased DFTModeRaw samples
   let wDFT = processDFT BiasDebiased (DFTModeProper wWindowSize hannWindow) samples
   writeFile (af "stats" "txt") $
@@ -274,10 +283,11 @@ analyze plotMode dir what nBits samples = do
   case plotMode of
     Just ff -> do
       writeFile (af "hist" "txt") $ showHist $ rawHist samples
-      plotRender ff (af' "ts") $ plotTimeSeries samples
-      plotRender ff (af' "hist") $ plotSampleHist (2 ^ nBits) samples
-      plotRender ff (af' "dft") $ plotSampleDFT rDFT
-      plotRender ff (af' "wdft") $ plotSampleDFT wDFT
+      let pr = plotRender ff
+      pr (af' "ts") $ plotTimeSeries colors samples
+      pr (af' "hist") $ plotSampleHist colors (2 ^ nBits) samples
+      pr (af' "dft") $ plotSampleDFT colors rDFT
+      pr (af' "wdft") $ plotSampleDFT colors wDFT
     Nothing -> return ()
   where
     af = analysisFile dir what
@@ -286,7 +296,22 @@ analyze plotMode dir what nBits samples = do
 data ArgIndex = ArgIndexBitsFile
               | ArgIndexPlotFormat
               | ArgIndexAnalysisDir
+              | ArgIndexColor
+              | ArgIndexColor2
                 deriving (Eq, Ord, Show)
+
+maybeReadS :: ReadS a -> String -> Maybe a
+maybeReadS f s =
+    case f s of
+      [(v, "")] -> Just v
+      _ -> Nothing
+
+readColor :: String -> Colour Double
+readColor name =
+    head $ mapMaybe id [
+               maybeReadS sRGB24reads name,
+               readColourName name,
+               error "illegal color" ]
 
 argd :: [Arg ArgIndex]
 argd = [
@@ -302,6 +327,18 @@ argd = [
     argAbbr = Just 'a',
     argData = argDataDefaulted "dir" ArgtypeString defaultAnalysisDir,
     argDesc = "Directory for analysis results" },
+  Arg {
+    argIndex = ArgIndexColor,
+    argName = Just "color",
+    argAbbr = Nothing,
+    argData = argDataDefaulted "name/rgb" ArgtypeString "black",
+    argDesc = "Plot color" },
+  Arg {
+    argIndex = ArgIndexColor2,
+    argName = Just "secondary-color",
+    argAbbr = Nothing,
+    argData = argDataDefaulted "name/rgb" ArgtypeString "gray",
+    argDesc = "Plot secondary color" },
   Arg {
     argIndex = ArgIndexBitsFile,
     argName = Nothing,
@@ -328,7 +365,10 @@ main = do
   let analysisDir = getRequiredArg args ArgIndexAnalysisDir
   createDirectoryIfMissing True analysisDir
 
-  let aa = analyze plotFormat analysisDir
+  let plotColor = readColor $ getRequiredArg args ArgIndexColor
+  let plotColor2 = readColor $ getRequiredArg args ArgIndexColor2
+
+  let aa = analyze plotFormat (plotColor, plotColor2) analysisDir
 
   aa "raw" 12 samples
 
