@@ -357,7 +357,7 @@ argd = [
 
 
 testSet :: [String]
-testSet = ["raw","prng","twobit","mid","mid7","low","hm"]
+testSet = ["raw","prng","twobit","mid","mid7","low"]
 
 testHelp :: IO ()
 testHelp = do
@@ -399,8 +399,11 @@ main = do
 
   aa "raw" 12 samples
 
-  prngSamples <- replicateM (length samples) (randomRIO (0, 4095) :: IO Int)
-  aa "prng" 12 prngSamples
+  prng12Samples <- replicateM (length samples) (randomRIO (0, 4095) :: IO Int)
+  aa "prng12" 12 prng12Samples
+
+  prngSamples <- replicateM (length samples) (randomRIO (0, 255) :: IO Int)
+  aa "prng" 8 prngSamples
 
   let twoBitSamples = map (.&. 0x03) samples
   aa "twobit" 2 twoBitSamples
