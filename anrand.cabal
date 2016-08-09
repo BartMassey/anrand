@@ -51,6 +51,7 @@ executable anrand
                        lens >=4.13 && <5,
                        parseargs >=0.2 && <1,
                        random >=1.1 && <2,
+                       split >= 0.2 && < 1,
                        vector >=0.11 && <1,
                        vector-fftw >=0.1 && <1
                        

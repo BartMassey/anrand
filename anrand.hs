@@ -11,6 +11,7 @@ import Data.Colour
 import Data.Colour.Names
 import Data.Colour.SRGB
 import Data.Default.Class
+import Data.List.Split (splitOn)
 import Data.Maybe
 import Graphics.Rendering.Chart
 import Graphics.Rendering.Chart.Backend.Cairo
@@ -25,6 +26,7 @@ import qualified Data.ByteString as B
 import Data.List
 import System.Console.ParseArgs
 import System.Directory
+import System.Exit (exitSuccess)
 import System.FilePath
 import System.Random
 import Text.Printf
@@ -298,6 +300,7 @@ data ArgIndex = ArgIndexBitsFile
               | ArgIndexAnalysisDir
               | ArgIndexColor
               | ArgIndexColor2
+              | ArgIndexTests
                 deriving (Eq, Ord, Show)
 
 maybeReadS :: ReadS a -> String -> Maybe a
@@ -340,6 +343,12 @@ argd = [
     argData = argDataDefaulted "name/rgb" ArgtypeString "gray",
     argDesc = "Plot secondary color" },
   Arg {
+    argIndex = ArgIndexTests,
+    argName = Just "tests",
+    argAbbr = Just 't',
+    argData = argDataOptional "test-list" ArgtypeString,
+    argDesc = "Comma-separated list of tests (\"help\" for help)" },
+  Arg {
     argIndex = ArgIndexBitsFile,
     argName = Nothing,
     argAbbr = Nothing,
@@ -347,9 +356,24 @@ argd = [
     argDesc = "Random bits." } ]
 
 
+testSet :: [String]
+testSet = ["raw","prng","twobit","mid","mid7","low","hm"]
+
+testHelp :: IO ()
+testHelp = do
+  printf "Available Tests:\n"
+  mapM_ (\t -> printf "  %s\n" t) testSet
+  exitSuccess
+
 main :: IO ()
 main = do
   args <- parseArgsIO ArgsComplete argd
+
+  let tests =
+          case getArg args ArgIndexTests of
+            Nothing -> testSet
+            Just(ts) -> splitOn "," ts
+  when (tests == ["help"]) testHelp
 
   let plotFormat =
           case map toLower $ getRequiredArg args ArgIndexPlotFormat of
@@ -368,7 +392,10 @@ main = do
   let plotColor = readColor $ getRequiredArg args ArgIndexColor
   let plotColor2 = readColor $ getRequiredArg args ArgIndexColor2
 
-  let aa = analyze plotFormat (plotColor, plotColor2) analysisDir
+  let aa name bits source =
+          when (name `elem` tests) $
+               analyze plotFormat (plotColor, plotColor2) analysisDir
+                       name bits source
 
   aa "raw" 12 samples
 
@@ -381,5 +408,18 @@ main = do
   let midSamples = map ((.&. 0xff) . (`shiftR` 1)) samples
   aa "mid" 8 midSamples
 
+  let mid7Samples = map ((.&. 0x7f) . (`shiftR` 2)) samples
+  aa "mid7" 7 mid7Samples
+
   let lowSamples = map (.&. 0xff) samples
   aa "low" 8 lowSamples
+
+  let hmSamples = map hmBits samples
+                  where
+                    hmBits sample =
+                        let mid = (sample `shiftR` 1) .&. 0xff in
+                        mid `xor` (sample .&. 0x01) `xor`
+                          ((sample `shiftR` 9) .&. 0x01) `xor`
+                          ((sample `shiftR` 10) .&. 0x01) `xor`
+                          ((sample `shiftR` 11) .&. 0x01)
+  aa "hm" 8 hmSamples
