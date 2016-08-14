@@ -51,9 +51,9 @@ plotRender ff name r = do
     _ <- renderableToFile (fo_format .~ ff $ def) name r
     return ()
 
-readSamples :: B.ByteString -> [Int]
-readSamples stuff =
-    makeInts $ B.unpack stuff
+readSamples :: Int -> B.ByteString -> [Int]
+readSamples sampleCount stuff =
+    take sampleCount $ makeInts $ B.unpack stuff
     where
       makeInts [] = []
       makeInts [_] = error "odd byte array"
@@ -298,6 +298,7 @@ analyze plotMode colors dir what nBits samples = do
 data ArgIndex = ArgIndexBitsFile
               | ArgIndexPlotFormat
               | ArgIndexAnalysisDir
+              | ArgIndexSampleCount
               | ArgIndexColor
               | ArgIndexColor2
               | ArgIndexTests
@@ -330,6 +331,12 @@ argd = [
     argAbbr = Just 'a',
     argData = argDataDefaulted "dir" ArgtypeString defaultAnalysisDir,
     argDesc = "Directory for analysis results" },
+  Arg {
+    argIndex = ArgIndexSampleCount,
+    argName = Just "sample-count",
+    argAbbr = Just 's',
+    argData = argDataOptional "count" ArgtypeInt,
+    argDesc = "Number of samples to analyze" },
   Arg {
     argIndex = ArgIndexColor,
     argName = Just "color",
@@ -384,7 +391,10 @@ main = do
 
   bitsFile <- getArgStdio args ArgIndexBitsFile ReadMode
   rawSamples <- B.hGetContents bitsFile
-  let samples = readSamples rawSamples
+  let sampleCount = case getArg args ArgIndexSampleCount of
+                      Nothing -> B.length rawSamples `div` 2
+                      Just n -> B.length rawSamples `min` n
+  let samples = readSamples sampleCount rawSamples
 
   let analysisDir = getRequiredArg args ArgIndexAnalysisDir
   createDirectoryIfMissing True analysisDir
