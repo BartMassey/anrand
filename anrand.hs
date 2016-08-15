@@ -391,9 +391,10 @@ main = do
 
   bitsFile <- getArgStdio args ArgIndexBitsFile ReadMode
   rawSamples <- B.hGetContents bitsFile
+  let nSamples = B.length rawSamples `div` 2
   let sampleCount = case getArg args ArgIndexSampleCount of
-                      Nothing -> B.length rawSamples `div` 2
-                      Just n -> B.length rawSamples `min` n
+                      Nothing -> nSamples
+                      Just n -> nSamples `min` n
   let samples = readSamples sampleCount rawSamples
 
   let analysisDir = getRequiredArg args ArgIndexAnalysisDir
